@@ -5,6 +5,10 @@ import react from "@vitejs/plugin-react";
 // Ajuste o "target" para o endereco do seu backend (Node/Express, FastAPI, etc.).
 export default defineConfig({
   plugins: [react()],
+  // mqtt.js (no navegador) espera a variavel global "global"
+  define: {
+    global: "globalThis",
+  },
   server: {
     port: 5173,
     proxy: {

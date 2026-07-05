@@ -4,6 +4,7 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import ParametrosPage from "./pages/ParametrosPage.jsx";
 import AlertasPage from "./pages/AlertasPage.jsx";
 import LogsPage from "./pages/LogsPage.jsx";
+import SensorAoVivoPage from "./pages/SensorAoVivoPage.jsx";
 
 function Sidebar({ alertCount }) {
   return (
@@ -31,6 +32,9 @@ function Sidebar({ alertCount }) {
       </NavLink>
       <NavLink to="/logs" className="nav-link">
         <span className="ico">📋</span> Auditoria
+      </NavLink>
+      <NavLink to="/ao-vivo" className="nav-link">
+        <span className="ico">📡</span> Sensor ao vivo
       </NavLink>
       <div className="sidebar__footer">
         ESP32 · MQTT · API REST · ntfy.sh
@@ -61,6 +65,7 @@ const TITLES = {
   "/parametros": "Parametros e Alertas",
   "/alertas": "Central de Alertas",
   "/logs": "Auditoria e Rastreabilidade",
+  "/ao-vivo": "Sensor ao Vivo (ESP32)",
 };
 
 export default function App() {
@@ -75,6 +80,7 @@ export default function App() {
           <Route path="/parametros" element={<Page title={TITLES["/parametros"]}><ParametrosPage /></Page>} />
           <Route path="/alertas" element={<Page title={TITLES["/alertas"]}><AlertasPage /></Page>} />
           <Route path="/logs" element={<Page title={TITLES["/logs"]}><LogsPage /></Page>} />
+          <Route path="/ao-vivo" element={<Page title={TITLES["/ao-vivo"]}><SensorAoVivoPage /></Page>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

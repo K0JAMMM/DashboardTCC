@@ -92,6 +92,9 @@ let booted = false; // evita registrar eventos durante o pre-aquecimento
 let snapCount = 0;
 const SNAPSHOT_EVERY = 40; // registro ambiental periodico (~2 min com tick de 3s)
 
+// Sala alimentada por FONTE EXTERNA (ESP32 real via MQTT); null = todas simuladas.
+let externalRoom = null;
+
 function logEvento(categoria, descricao, opts = {}) {
   if (!booted) return;
   eventos = [
@@ -277,28 +280,25 @@ function tick() {
       r.vav.motivo = motivo;
     }
 
-    // 2) Fisica do ambiente reage a abertura da VAV (malha fechada).
-    // A sala tende a uma temperatura de equilibrio que depende da vazao de ar frio:
-    //  - VAV fechada  -> tende a TEMP_AMBIENTE (sem resfriamento).
-    //  - VAV 100%     -> tende a ~temperatura de insuflamento (limite fisico).
-    // Assim a sala nunca esfria abaixo do ar insuflado, por mais que a VAV abra.
-    if (clima && clima.ligado) {
-      const alvoFisico =
-        clima.tempInsuflamento + (TEMP_AMBIENTE - clima.tempInsuflamento) * (1 - EFICIENCIA * (r.vav.abertura / 100));
-      r.temperatura = drift(r.temperatura + (alvoFisico - r.temperatura) * 0.25, 0.08, 12, 40);
-    } else {
-      // sem frio disponivel: a temperatura tende a temperatura ambiente natural
-      r.temperatura = drift(r.temperatura + (TEMP_AMBIENTE - r.temperatura) * 0.15, 0.12, 12, 40);
+    // 2) Fisica do ambiente. Salas com FONTE EXTERNA (ESP32 via MQTT) nao sao
+    // simuladas: seus valores vem de ingestTelemetry(). As demais sao simuladas.
+    if (r.id !== externalRoom) {
+      // A sala tende a uma temperatura de equilibrio que depende da vazao de ar frio:
+      //  - VAV fechada -> tende a TEMP_AMBIENTE; VAV 100% -> ~temperatura de insuflamento.
+      // A sala nunca esfria abaixo do ar insuflado, por mais que a VAV abra.
+      if (clima && clima.ligado) {
+        const alvoFisico =
+          clima.tempInsuflamento + (TEMP_AMBIENTE - clima.tempInsuflamento) * (1 - EFICIENCIA * (r.vav.abertura / 100));
+        r.temperatura = drift(r.temperatura + (alvoFisico - r.temperatura) * 0.25, 0.08, 12, 40);
+      } else {
+        r.temperatura = drift(r.temperatura + (TEMP_AMBIENTE - r.temperatura) * 0.15, 0.12, 12, 40);
+      }
+      const umidAlvo = clima && clima.ligado ? 50 : 58;
+      r.umidade = drift(r.umidade + (umidAlvo - r.umidade) * 0.08, 0.7, 25, 80);
+      const co2Delta = 10 - (r.vav.abertura / 100) * 45;
+      r.co2 = drift(r.co2 + co2Delta, 16, 420, 2000);
+      r.ultimaLeitura = now;
     }
-    // Umidade tende a um alvo confortavel (~50%, centro da faixa NBR 7256 40-60%),
-    // com pequena variacao. O climatizador ligado ajuda a controlar a umidade.
-    const umidAlvo = clima && clima.ligado ? 50 : 58;
-    r.umidade = drift(r.umidade + (umidAlvo - r.umidade) * 0.08, 0.7, 25, 80);
-    // CO2: producao por ocupacao menos ventilacao proporcional a abertura.
-    // Bem ventilada estabiliza ~450-650 ppm (ar externo ~400); sobe se a VAV fecha.
-    const co2Delta = 10 - (r.vav.abertura / 100) * 45;
-    r.co2 = drift(r.co2 + co2Delta, 16, 420, 2000);
-    r.ultimaLeitura = now;
 
     pushHistory(r.id, "temperatura", r.temperatura);
     pushHistory(r.id, "umidade", r.umidade);
@@ -349,7 +349,7 @@ export const mock = {
     return clone({
       timestamp: new Date().toISOString(),
       conexao: { online: true, fonte: "MOCK" },
-      salas: rooms.map((r) => ({ ...r, status: roomStatus(r) })),
+      salas: rooms.map((r) => ({ ...r, status: roomStatus(r), fonte: r.id === externalRoom ? "ESP32" : "MOCK" })),
       climatizadores,
       banheiros: bathrooms.map((b) => ({ ...b })),
       exaustao: { ligada: bathrooms.some((b) => b.luz), logica: "OR" },
@@ -472,15 +472,21 @@ export const mock = {
     logEvento("registro", "Identificacao do relatorio de auditoria atualizada", { origem: "operador" });
     return clone(identificacao);
   },
-  // injeta uma leitura "do Arduino" (mesma forma do POST /api/telemetria)
+  // injeta uma leitura "do Arduino/ESP32" (mesma forma do POST /api/telemetria)
   ingestTelemetry(payload) {
     const r = rooms.find((x) => x.id === payload.salaId);
     if (!r) return { ok: false };
-    if (payload.temperatura != null) r.temperatura = payload.temperatura;
-    if (payload.umidade != null) r.umidade = payload.umidade;
-    if (payload.co2 != null) r.co2 = payload.co2;
+    if (payload.temperatura != null) r.temperatura = Number(payload.temperatura);
+    if (payload.umidade != null) r.umidade = Number(payload.umidade);
+    if (payload.co2 != null) r.co2 = Number(payload.co2);
     r.ultimaLeitura = new Date().toISOString();
     evaluateAlerts();
     return { ok: true };
+  },
+  // define qual sala e alimentada por fonte externa (ESP32). null = nenhuma.
+  setFonteExterna(salaId) {
+    externalRoom = rooms.some((r) => r.id === salaId) ? salaId : null;
+    if (externalRoom) logEvento("registro", `${nomeDaSala(externalRoom)} vinculada a fonte externa (ESP32 via MQTT)`, { salaId: externalRoom, origem: "operador" });
+    return { externalRoom };
   },
 };

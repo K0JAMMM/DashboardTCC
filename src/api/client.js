@@ -134,4 +134,17 @@ export const api = {
       ? tick(mock.saveIdentificacao(next))
       : http("/identificacao", { method: "PUT", body: JSON.stringify(next) });
   },
+
+  // POST /api/telemetria  -> injeta leitura de sensor (ESP32) numa sala
+  ingestTelemetry(payload) {
+    return MODE === "mock"
+      ? tick(mock.ingestTelemetry(payload))
+      : http("/telemetria", { method: "POST", body: JSON.stringify(payload) });
+  },
+  // PUT /api/fonte-externa  -> define qual sala usa dados reais do ESP32
+  setFonteExterna(salaId) {
+    return MODE === "mock"
+      ? tick(mock.setFonteExterna(salaId))
+      : http("/fonte-externa", { method: "PUT", body: JSON.stringify({ salaId }) });
+  },
 };

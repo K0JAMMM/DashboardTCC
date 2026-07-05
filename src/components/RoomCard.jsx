@@ -54,7 +54,17 @@ export default function RoomCard({ room, climatizador }) {
     <div className="room">
       <div className="room__head">
         <div>
-          <div className="room__name">{room.nome}</div>
+          <div className="room__name">
+            {room.nome}
+            {room.fonte === "ESP32" && (
+              <span
+                style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: "#fff", background: "var(--color-critical)", padding: "2px 7px", borderRadius: 999, verticalAlign: "middle", letterSpacing: 0.5 }}
+                title="Dados reais do ESP32 via MQTT"
+              >
+                ● AO VIVO
+              </span>
+            )}
+          </div>
           <div className="room__sub">
             {climatizador ? climatizador.nome : "sem climatizador"} · alvo{" "}
             <strong>{room.setpoint}°C</strong>

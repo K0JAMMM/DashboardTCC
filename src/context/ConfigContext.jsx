@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { api } from "../api/client.js";
+import { createMqttLive, DEFAULT_URL, DEFAULT_TOPIC } from "../api/mqttLive.js";
 
 const ConfigContext = createContext(null);
 
@@ -11,6 +12,16 @@ export function ConfigProvider({ children }) {
   const [thresholds, setThresholds] = useState(null);
   const [error, setError] = useState(null);
   const mounted = useRef(true);
+
+  // ----- ponte MQTT ao vivo (ESP32 -> uma sala) -----
+  const [liveConfig, setLiveConfigState] = useState({
+    enabled: false,
+    url: DEFAULT_URL,
+    topic: DEFAULT_TOPIC,
+    salaAlvo: "sala-1",
+  });
+  const [liveStatus, setLiveStatus] = useState({ connected: false, connecting: false, lastData: null, lastTs: null, error: null });
+  const mqttRef = useRef(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -34,6 +45,41 @@ export function ConfigProvider({ children }) {
       clearInterval(id);
     };
   }, [refresh]);
+
+  // Ponte MQTT: quando habilitada, assina o broker e injeta as leituras do ESP
+  // na sala-alvo (que passa a NAO ser simulada). Reconecta quando a config muda.
+  useEffect(() => {
+    mqttRef.current?.disconnect();
+    mqttRef.current = null;
+
+    if (!liveConfig.enabled) {
+      api.setFonteExterna(null).then(refresh).catch(() => {});
+      setLiveStatus({ connected: false, connecting: false, lastData: null, lastTs: null, error: null });
+      return;
+    }
+
+    api.setFonteExterna(liveConfig.salaAlvo).then(refresh).catch(() => {});
+    const client = createMqttLive({ url: liveConfig.url, topic: liveConfig.topic });
+    mqttRef.current = client;
+    const unsub = client.subscribe((s) => {
+      setLiveStatus(s);
+      if (s.lastData) {
+        const d = s.lastData;
+        api
+          .ingestTelemetry({ salaId: liveConfig.salaAlvo, temperatura: d.temperature, umidade: d.humidity, co2: d.co2 })
+          .then(refresh)
+          .catch(() => {});
+      }
+    });
+    return () => {
+      unsub();
+      client.disconnect();
+    };
+  }, [liveConfig, refresh]);
+
+  const setLiveConfig = useCallback((patch) => {
+    setLiveConfigState((c) => ({ ...c, ...patch }));
+  }, []);
 
   // ----- acoes -----
   const actions = {
@@ -78,7 +124,9 @@ export function ConfigProvider({ children }) {
   };
 
   return (
-    <ConfigContext.Provider value={{ state, alerts, thresholds, error, mode: api.mode, refresh, ...actions }}>
+    <ConfigContext.Provider
+      value={{ state, alerts, thresholds, error, mode: api.mode, refresh, liveConfig, liveStatus, setLiveConfig, ...actions }}
+    >
       {children}
     </ConfigContext.Provider>
   );
