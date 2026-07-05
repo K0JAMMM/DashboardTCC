@@ -51,6 +51,10 @@ export function ConfigProvider({ children }) {
       await api.setVavMode(roomId, modo);
       refresh();
     },
+    async setRoomSetpoint(roomId, setpoint) {
+      await api.setRoomSetpoint(roomId, setpoint);
+      refresh();
+    },
     async setVavFault(roomId, falha) {
       await api.setVavFault(roomId, falha);
       refresh();

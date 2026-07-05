@@ -25,19 +25,22 @@ export default function ClimatizadorPanel({ climatizador, salas }) {
       </div>
 
       <div className="vav" style={{ marginTop: 8 }}>
-        <span className="vav__label">Setpoint</span>
+        <span className="vav__label">Temp. de insuflamento</span>
         <div className="range">
           <input
             type="range"
-            min="16"
-            max="30"
+            min="12"
+            max="20"
             step="0.5"
-            value={c.setpoint}
+            value={c.tempInsuflamento}
             disabled={!c.ligado}
-            onChange={(e) => setClimatizador(c.id, { setpoint: Number(e.target.value) })}
+            onChange={(e) => setClimatizador(c.id, { tempInsuflamento: Number(e.target.value) })}
           />
-          <strong style={{ width: 52, textAlign: "right" }}>{c.setpoint.toFixed(1)}°C</strong>
+          <strong style={{ width: 52, textAlign: "right" }}>{c.tempInsuflamento.toFixed(1)}°C</strong>
         </div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        Ar frio central. A temperatura de cada sala é regulada pela sua VAV.
       </div>
 
       <div style={{ marginTop: 12 }}>

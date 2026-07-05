@@ -12,11 +12,12 @@ function Field({ label, value, onChange, step = "1", min }) {
 }
 
 export default function ParametrosPage() {
-  const { state, thresholds, saveThresholds } = useSystem();
+  const { state, thresholds, saveThresholds, setRoomSetpoint } = useSystem();
   const salas = state?.salas || [];
 
   const [salaId, setSalaId] = useState(null);
   const [form, setForm] = useState(null);
+  const [setpoint, setSetpoint] = useState(23);
   const [saved, setSaved] = useState(false);
 
   // ntfy
@@ -35,6 +36,13 @@ export default function ParametrosPage() {
     }
   }, [salaId, thresholds]);
 
+  // carrega o setpoint de temperatura da sala selecionada
+  useEffect(() => {
+    const s = salas.find((x) => x.id === salaId);
+    if (s && s.setpoint != null) setSetpoint(s.setpoint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salaId]);
+
   useEffect(() => {
     api.getNtfyConfig().then(setNtfy);
   }, []);
@@ -44,14 +52,16 @@ export default function ParametrosPage() {
 
   const handleSave = async () => {
     await saveThresholds(salaId, form);
+    await setRoomSetpoint(salaId, setpoint);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  // aplica as faixas da sala atual para todas as outras salas
+  // aplica as faixas E o setpoint da sala atual para todas as outras salas
   const aplicarTodas = async () => {
     for (const s of salas) {
       await saveThresholds(s.id, form);
+      await setRoomSetpoint(s.id, setpoint);
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -64,7 +74,9 @@ export default function ParametrosPage() {
     setTimeout(() => setNtfySaved(false), 2500);
   };
 
-  const nomeSala = salas.find((s) => s.id === salaId)?.nome || "";
+  const salaObj = salas.find((s) => s.id === salaId);
+  const nomeSala = salaObj?.nome || "";
+  const insuflSala = state?.climatizadores?.find((c) => c.id === salaObj?.climatizadorId)?.tempInsuflamento;
 
   return (
     <>
@@ -73,6 +85,11 @@ export default function ParametrosPage() {
         <p className="muted" style={{ marginTop: -6, fontSize: 13 }}>
           Cada sala tem suas próprias faixas. Valores fora da faixa geram alarme crítico;
           próximos da borda geram atenção. Os alertas são enviados via ntfy.sh.
+        </p>
+        <p className="muted" style={{ fontSize: 12, background: "var(--color-bg)", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border)" }}>
+          <strong>Padrão hospitalar:</strong> umidade 40–60% (ABNT NBR 7256) · CO₂ máx.
+          1000 ppm (ANVISA RE 09/2003 / NBR 7256). Áreas críticas podem exigir faixas mais
+          restritas (ex.: centro cirúrgico 45–55%).
         </p>
 
         {/* Seletor de sala */}
@@ -98,7 +115,19 @@ export default function ParametrosPage() {
             </div>
 
             <div className="form-row">
-              <div className="param-title">🌡️ Temperatura</div>
+              <div className="param-title">🎯 Setpoint de temperatura</div>
+              <Field label="Alvo da sala (°C)" value={setpoint} step="0.5" min="16" onChange={(v) => setSetpoint(Number(v))} />
+              <div className="field">
+                <label>&nbsp;</label>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  A VAV modula sozinha para manter a sala neste alvo.
+                  {insuflSala != null && ` Não pode ficar abaixo do ar insuflado (~${insuflSala}°C).`}
+                </span>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="param-title">🌡️ Faixa de alerta (temperatura)</div>
               <Field label="Minimo (°C)" value={form.temperatura.min} step="0.5" onChange={(v) => upd("temperatura", "min", v)} />
               <Field label="Maximo (°C)" value={form.temperatura.max} step="0.5" onChange={(v) => upd("temperatura", "max", v)} />
             </div>

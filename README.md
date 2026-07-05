@@ -14,6 +14,9 @@ Cores* do TCC (azul técnico `#0F4C81`, verde/âmbar/vermelho para status, contr
   banheiros (lógica OR), gráficos de telemetria com linhas de limite.
 - **Parâmetros editáveis** (faixas de temp/umidade/CO₂) e configuração do **ntfy.sh**.
 - **Central de alertas** com filtros, reconhecimento e log de notificações enviadas.
+- **Auditoria / rastreabilidade**: log de eventos (alertas, ações do operador, falhas) e
+  registros ambientais periódicos, com exportação em CSV — atende NBR 7256 e PMOC
+  (Lei 13.589/2018), com valor de segurança jurídica em inspeções e acreditação.
 - **Camada de API** com modo *mock* (simulador embutido) e modo *real* (REST).
 - **Contrato da API** completo em [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md):
   endpoints REST, tópicos MQTT, integração ntfy.sh e schema SQLite.

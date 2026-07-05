@@ -3,11 +3,23 @@ import { STATUS } from "../theme.js";
 const HISTORY_POINTS = 60; // ~ ultimos pontos por sala/metrica
 const TICK_MS = 3000;
 
+// Modelo termico do ambiente:
+//  - TEMP_AMBIENTE: temperatura natural da sala sem resfriamento (carga termica).
+//  - EFICIENCIA: quao perto do ar insuflado a sala chega com a VAV 100% aberta.
+// Limite fisico: a sala NUNCA esfria abaixo da temperatura de insuflamento
+// (principio do sistema VAV - so modula vazao de ar frio, nao muda a temperatura dele).
+const TEMP_AMBIENTE = 29;
+const EFICIENCIA = 0.95;
+
 // ----- Configuracao inicial (faixas de alerta editaveis POR SALA) ----------
+// Valores padrao conforme normas brasileiras para ambiente hospitalar:
+//  - Umidade: 40% a 60% (ABNT NBR 7256 - tratamento de ar em EAS, areas comuns)
+//  - CO2: max 1000 ppm (ANVISA RE 09/2003, base da NBR 7256; a NBR 17037:2023 usa
+//    700 ppm acima do ar externo). Usamos 1000 ppm como limite critico, 800 atencao.
 const defaultThresholds = () => ({
   temperatura: { min: 20, max: 26, unit: "C" },
   umidade: { min: 40, max: 60, unit: "%" },
-  co2: { warn: 800, critical: 1200, unit: "ppm" }, // escala inspirada no AQI/EPA
+  co2: { warn: 800, critical: 1000, unit: "ppm" },
 });
 // thresholds[salaId] = { temperatura, umidade, co2 }
 let thresholds = {};
@@ -19,24 +31,40 @@ let ntfyConfig = {
   minLevel: "atencao", // atencao | critico
 };
 
+// Identificacao do documento para o relatorio de auditoria (PMOC / NBR 7256).
+// Campos exigidos: estabelecimento, sistema e responsavel tecnico com registro/ART.
+let identificacao = {
+  estabelecimento: "",
+  cnes: "",
+  sistema: "Sistema de Automacao HVAC",
+  responsavelTecnico: "",
+  registro: "", // CREA/CFT + numero da ART/TRT
+};
+
 // ----- Topologia (4 salas, 2 climatizadores, 2 banheiros) ------------------
+// Sistema VAV multizona: cada sala tem seu proprio SETPOINT e a caixa VAV modula
+// a vazao de ar frio para atingi-lo. Uma unica unidade central (climatizador)
+// insufla ar frio para as salas que atende.
 const rooms = [
-  { id: "sala-1", nome: "Sala 1", climatizadorId: "clima-1" },
-  { id: "sala-2", nome: "Sala 2", climatizadorId: "clima-1" },
-  { id: "sala-3", nome: "Sala 3", climatizadorId: "clima-2" },
-  { id: "sala-4", nome: "Sala 4", climatizadorId: "clima-2" },
+  { id: "sala-1", nome: "Sala 1", climatizadorId: "clima-1", setpoint: 22 },
+  { id: "sala-2", nome: "Sala 2", climatizadorId: "clima-1", setpoint: 23 },
+  { id: "sala-3", nome: "Sala 3", climatizadorId: "clima-2", setpoint: 23 },
+  { id: "sala-4", nome: "Sala 4", climatizadorId: "clima-2", setpoint: 24 },
 ].map((r) => ({
   ...r,
-  temperatura: 22 + Math.random() * 2,
+  temperatura: r.setpoint + (Math.random() - 0.3) * 2,
   umidade: 48 + Math.random() * 6,
   co2: 440 + Math.random() * 120,
-  vav: { abertura: 60, estado: "ok", modo: "auto", motivo: "estavel" },
+  vav: { abertura: 40, estado: "ok", modo: "auto", motivo: "estavel" },
   ultimaLeitura: new Date().toISOString(),
 }));
 
+// Climatizador = unidade central de resfriamento (AHU). Insufla ar frio a
+// "tempInsuflamento" (constante, ~13-16 C). Liga/desliga a producao de frio;
+// quem regula a temperatura de cada sala e a VAV.
 const climatizadores = [
-  { id: "clima-1", nome: "Climatizador A", salas: ["sala-1", "sala-2"], ligado: true, setpoint: 23 },
-  { id: "clima-2", nome: "Climatizador B", salas: ["sala-3", "sala-4"], ligado: true, setpoint: 23 },
+  { id: "clima-1", nome: "Climatizador A", salas: ["sala-1", "sala-2"], ligado: true, tempInsuflamento: 15 },
+  { id: "clima-2", nome: "Climatizador B", salas: ["sala-3", "sala-4"], ligado: true, tempInsuflamento: 15 },
 ];
 
 const bathrooms = [
@@ -50,10 +78,38 @@ rooms.forEach((r) => {
   thresholds[r.id] = defaultThresholds(); // cada sala comeca com a faixa padrao
 });
 
-let alerts = []; 
-let ntfyLog = []; 
+let alerts = [];
+let ntfyLog = [];
 let alertSeq = 1;
-const activeAlertKeys = new Set(); 
+const activeAlertKeys = new Set();
+
+// ----- Log de auditoria (rastreabilidade - NBR 7256 / PMOC Lei 13.589/2018) -
+// Registra alertas, acoes do operador, falhas e snapshots ambientais periodicos.
+// No backend real, cada evento e persistido na tabela SQLite `eventos`.
+let eventos = [];
+let evSeq = 1;
+let booted = false; // evita registrar eventos durante o pre-aquecimento
+let snapCount = 0;
+const SNAPSHOT_EVERY = 40; // registro ambiental periodico (~2 min com tick de 3s)
+
+function logEvento(categoria, descricao, opts = {}) {
+  if (!booted) return;
+  eventos = [
+    {
+      id: `ev-${evSeq++}`,
+      ts: new Date().toISOString(),
+      categoria, // alerta | reconhecimento | parametro | setpoint | vav | climatizador | exaustao | registro
+      descricao,
+      salaId: opts.salaId || null,
+      origem: opts.origem || "sistema", // sistema | operador
+    },
+    ...eventos,
+  ].slice(0, 1000);
+}
+
+function nomeDaSala(salaId) {
+  return rooms.find((r) => r.id === salaId)?.nome || salaId || "-";
+}
 
 // ----- Avaliacao de status (usa as faixas da propria sala) -----------------
 function statusTemperatura(v, t) {
@@ -114,6 +170,7 @@ function pushAlert(level, tipo, mensagem, salaId) {
   };
   alerts = [alert, ...alerts].slice(0, 100);
   sendToNtfy(alert);
+  logEvento("alerta", `[${level.toUpperCase()}] ${mensagem}`, { salaId, origem: "sistema" });
 }
 
 // Simula o POST que o backend faria para o ntfy.sh.
@@ -176,15 +233,13 @@ function drift(value, delta, lo, hi) {
 function autoVav(room, clima) {
   const t = thresholds[room.id] || defaultThresholds();
   const climaLigado = clima && clima.ligado;
-  const setpoint = climaLigado ? clima.setpoint : room.temperatura;
 
-  // Demanda de resfriamento (so existe se o climatizador estiver ligado)
+  // Demanda de resfriamento: controle proporcional ao erro em relacao ao
+  // SETPOINT DA PROPRIA SALA. So ha resfriamento se a unidade central estiver ligada.
   let coolDemand = 0;
   if (climaLigado) {
-    const erro = room.temperatura - setpoint; // > 0 = quente demais
-    if (erro <= -1) coolDemand = 8; // ja abaixo do alvo -> quase fechada
-    else if (erro >= 2) coolDemand = 100; // muito acima -> totalmente aberta
-    else coolDemand = 8 + ((erro + 1) / 3) * 92; // proporcional
+    const erro = room.temperatura - room.setpoint; // > 0 = acima do alvo
+    coolDemand = Math.max(5, Math.min(100, 40 + erro * 120));
   }
 
   // Demanda de ventilacao a partir do CO2 (renova o ar)
@@ -192,10 +247,20 @@ function autoVav(room, clima) {
   if (room.co2 >= t.co2.critical) ventDemand = 100;
   else if (room.co2 >= t.co2.warn)
     ventDemand = 50 + ((room.co2 - t.co2.warn) / (t.co2.critical - t.co2.warn)) * 50;
-  else ventDemand = (room.co2 / t.co2.warn) * 40; // renovacao minima
+  else ventDemand = (room.co2 / t.co2.warn) * 20; // renovacao minima
 
   const target = Math.max(coolDemand, ventDemand);
-  const motivo = ventDemand > coolDemand ? "ventilacao" : coolDemand > 20 ? "resfriamento" : "estavel";
+  // Motivo baseado no ESTADO real da sala, nao so na abertura:
+  //  - sem_frio: unidade central desligada (VAV nao consegue resfriar)
+  //  - ventilacao: renovacao de ar (CO2) manda mais que o resfriamento
+  //  - resfriamento: sala acima do alvo, puxando a temperatura para baixo
+  //  - regime: sala no alvo, VAV so mantendo (modulacao parcial e normal)
+  let motivo;
+  const erro = room.temperatura - room.setpoint;
+  if (!climaLigado) motivo = "sem_frio";
+  else if (ventDemand > coolDemand) motivo = "ventilacao";
+  else if (erro > 0.4) motivo = "resfriamento";
+  else motivo = "regime";
   return { target: Math.max(0, Math.min(100, target)), motivo };
 }
 
@@ -212,18 +277,27 @@ function tick() {
       r.vav.motivo = motivo;
     }
 
-    // 2) Fisica do ambiente reage a abertura da VAV (malha fechada)
+    // 2) Fisica do ambiente reage a abertura da VAV (malha fechada).
+    // A sala tende a uma temperatura de equilibrio que depende da vazao de ar frio:
+    //  - VAV fechada  -> tende a TEMP_AMBIENTE (sem resfriamento).
+    //  - VAV 100%     -> tende a ~temperatura de insuflamento (limite fisico).
+    // Assim a sala nunca esfria abaixo do ar insuflado, por mais que a VAV abra.
     if (clima && clima.ligado) {
-      const pull = (clima.setpoint - r.temperatura) * 0.18 * (r.vav.abertura / 100);
-      r.temperatura = drift(r.temperatura + pull, 0.22, 16, 34);
+      const alvoFisico =
+        clima.tempInsuflamento + (TEMP_AMBIENTE - clima.tempInsuflamento) * (1 - EFICIENCIA * (r.vav.abertura / 100));
+      r.temperatura = drift(r.temperatura + (alvoFisico - r.temperatura) * 0.25, 0.08, 12, 40);
     } else {
-      r.temperatura = drift(r.temperatura + 0.15, 0.22, 16, 34);
+      // sem frio disponivel: a temperatura tende a temperatura ambiente natural
+      r.temperatura = drift(r.temperatura + (TEMP_AMBIENTE - r.temperatura) * 0.15, 0.12, 12, 40);
     }
-    r.umidade = drift(r.umidade, 1.2, 25, 80);
+    // Umidade tende a um alvo confortavel (~50%, centro da faixa NBR 7256 40-60%),
+    // com pequena variacao. O climatizador ligado ajuda a controlar a umidade.
+    const umidAlvo = clima && clima.ligado ? 50 : 58;
+    r.umidade = drift(r.umidade + (umidAlvo - r.umidade) * 0.08, 0.7, 25, 80);
     // CO2: producao por ocupacao menos ventilacao proporcional a abertura.
     // Bem ventilada estabiliza ~450-650 ppm (ar externo ~400); sobe se a VAV fecha.
-    const co2Delta = 14 - (r.vav.abertura / 100) * 48;
-    r.co2 = drift(r.co2 + co2Delta, 18, 420, 2000);
+    const co2Delta = 10 - (r.vav.abertura / 100) * 45;
+    r.co2 = drift(r.co2 + co2Delta, 16, 420, 2000);
     r.ultimaLeitura = now;
 
     pushHistory(r.id, "temperatura", r.temperatura);
@@ -231,6 +305,15 @@ function tick() {
     pushHistory(r.id, "co2", r.co2);
   });
   evaluateAlerts();
+
+  // Registro ambiental periodico (rastreabilidade continua)
+  if (booted && ++snapCount >= SNAPSHOT_EVERY) {
+    snapCount = 0;
+    const resumo = rooms
+      .map((r) => `${r.nome}: ${r.temperatura.toFixed(1)}°C / ${r.umidade.toFixed(0)}% / ${r.co2.toFixed(0)}ppm`)
+      .join(" | ");
+    logEvento("registro", `Registro ambiental — ${resumo}`, { origem: "sistema" });
+  }
 }
 
 function pushHistory(roomId, metric, value) {
@@ -239,8 +322,10 @@ function pushHistory(roomId, metric, value) {
   if (arr.length > HISTORY_POINTS) arr.shift();
 }
 
-// pre-popula o historico para os graficos ja terem dados
+// pre-popula o historico para os graficos ja terem dados (sem registrar eventos)
 for (let i = 0; i < HISTORY_POINTS; i++) tick();
+booted = true; // a partir daqui os eventos passam a ser registrados
+logEvento("registro", "Sistema de supervisao iniciado", { origem: "sistema" });
 
 let timer = null;
 export function startSimulation() {
@@ -283,13 +368,21 @@ export const mock = {
     thresholds[salaId] = { ...thresholds[salaId], ...next };
     activeAlertKeys.clear(); // reavalia com os novos limites
     evaluateAlerts();
+    const t = thresholds[salaId];
+    logEvento(
+      "parametro",
+      `Faixas de alerta de ${nomeDaSala(salaId)} alteradas — temp ${t.temperatura.min}-${t.temperatura.max}°C, umidade ${t.umidade.min}-${t.umidade.max}%, CO2 ${t.co2.warn}/${t.co2.critical}ppm`,
+      { salaId, origem: "operador" }
+    );
     return clone(thresholds);
   },
   getAlerts() {
     return clone(alerts);
   },
   acknowledgeAlert(id) {
+    const alvo = alerts.find((a) => a.id === id);
     alerts = alerts.map((a) => (a.id === id ? { ...a, reconhecido: true } : a));
+    if (alvo) logEvento("reconhecimento", `Alerta reconhecido: ${alvo.mensagem}`, { salaId: alvo.salaId, origem: "operador" });
     return clone(alerts);
   },
   clearAcknowledged() {
@@ -303,6 +396,7 @@ export const mock = {
       r.vav.modo = "manual";
       r.vav.abertura = Math.max(0, Math.min(100, Math.round(abertura)));
       r.vav.motivo = "manual";
+      logEvento("vav", `${nomeDaSala(roomId)}: VAV ajustada manualmente para ${r.vav.abertura}%`, { salaId: roomId, origem: "operador" });
     }
     return clone(r);
   },
@@ -312,24 +406,48 @@ export const mock = {
     if (r) {
       r.vav.modo = modo === "manual" ? "manual" : "auto";
       if (r.vav.modo === "auto") r.vav.motivo = "estavel";
+      logEvento("vav", `${nomeDaSala(roomId)}: modo da VAV alterado para ${r.vav.modo.toUpperCase()}`, { salaId: roomId, origem: "operador" });
     }
     return clone(r);
   },
   setVavFault(roomId, falha) {
     const r = rooms.find((x) => x.id === roomId);
-    if (r) r.vav.estado = falha ? "falha" : "ok";
+    if (r) {
+      r.vav.estado = falha ? "falha" : "ok";
+      logEvento("vav", `${nomeDaSala(roomId)}: falha de VAV ${falha ? "registrada" : "normalizada"}`, {
+        salaId: roomId,
+        origem: falha ? "sistema" : "operador",
+      });
+    }
+    return clone(r);
+  },
+  // define o setpoint de temperatura (alvo) de uma sala
+  setRoomSetpoint(roomId, setpoint) {
+    const r = rooms.find((x) => x.id === roomId);
+    if (r) {
+      const antigo = r.setpoint;
+      r.setpoint = Math.max(16, Math.min(30, Number(setpoint)));
+      if (antigo !== r.setpoint)
+        logEvento("setpoint", `${nomeDaSala(roomId)}: setpoint alterado de ${antigo}°C para ${r.setpoint}°C`, { salaId: roomId, origem: "operador" });
+    }
     return clone(r);
   },
   setClimatizador(id, patch) {
     const c = climatizadores.find((x) => x.id === id);
-    if (c) Object.assign(c, patch);
+    if (c) {
+      Object.assign(c, patch);
+      if ("ligado" in patch) logEvento("climatizador", `${c.nome} ${c.ligado ? "ligado" : "desligado"}`, { origem: "operador" });
+      if ("tempInsuflamento" in patch) logEvento("climatizador", `${c.nome}: temperatura de insuflamento ajustada para ${c.tempInsuflamento}°C`, { origem: "operador" });
+    }
     return clone(c);
   },
   setBathroomLight(id, luz) {
     const b = bathrooms.find((x) => x.id === id);
     if (b) b.luz = luz;
+    const exaustao = bathrooms.some((x) => x.luz);
+    if (b) logEvento("exaustao", `${b.nome}: luz ${luz ? "ligada" : "desligada"} → exaustor ${exaustao ? "LIGADO" : "DESLIGADO"} (lógica OR)`, { origem: "operador" });
     // intertravamento: a exaustao segue a logica OR das luzes
-    return clone({ banheiros: bathrooms, exaustao: { ligada: bathrooms.some((x) => x.luz), logica: "OR" } });
+    return clone({ banheiros: bathrooms, exaustao: { ligada: exaustao, logica: "OR" } });
   },
   getNtfyConfig() {
     return clone(ntfyConfig);
@@ -340,6 +458,19 @@ export const mock = {
   },
   getNtfyLog() {
     return clone(ntfyLog);
+  },
+  // log de auditoria completo (rastreabilidade)
+  getEvents() {
+    return clone(eventos);
+  },
+  // identificacao do documento (estabelecimento / responsavel tecnico)
+  getIdentificacao() {
+    return clone(identificacao);
+  },
+  saveIdentificacao(next) {
+    identificacao = { ...identificacao, ...next };
+    logEvento("registro", "Identificacao do relatorio de auditoria atualizada", { origem: "operador" });
+    return clone(identificacao);
   },
   // injeta uma leitura "do Arduino" (mesma forma do POST /api/telemetria)
   ingestTelemetry(payload) {

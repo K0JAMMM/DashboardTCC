@@ -3,6 +3,7 @@ import { useSystem } from "./context/ConfigContext.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import ParametrosPage from "./pages/ParametrosPage.jsx";
 import AlertasPage from "./pages/AlertasPage.jsx";
+import LogsPage from "./pages/LogsPage.jsx";
 
 function Sidebar({ alertCount }) {
   return (
@@ -27,6 +28,9 @@ function Sidebar({ alertCount }) {
             {alertCount}
           </span>
         )}
+      </NavLink>
+      <NavLink to="/logs" className="nav-link">
+        <span className="ico">📋</span> Auditoria
       </NavLink>
       <div className="sidebar__footer">
         ESP32 · MQTT · API REST · ntfy.sh
@@ -56,6 +60,7 @@ const TITLES = {
   "/": "Visao Geral",
   "/parametros": "Parametros e Alertas",
   "/alertas": "Central de Alertas",
+  "/logs": "Auditoria e Rastreabilidade",
 };
 
 export default function App() {
@@ -69,6 +74,7 @@ export default function App() {
           <Route path="/" element={<Page title={TITLES["/"]}><DashboardPage /></Page>} />
           <Route path="/parametros" element={<Page title={TITLES["/parametros"]}><ParametrosPage /></Page>} />
           <Route path="/alertas" element={<Page title={TITLES["/alertas"]}><AlertasPage /></Page>} />
+          <Route path="/logs" element={<Page title={TITLES["/logs"]}><LogsPage /></Page>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

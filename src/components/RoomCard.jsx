@@ -18,9 +18,11 @@ function Metric({ label, icon, value, unit, status, digits = 1 }) {
 }
 
 const MOTIVO = {
-  estavel: { txt: "Estável", cor: "var(--color-success)" },
+  regime: { txt: "Em regime (no alvo)", cor: "var(--color-success)" },
+  estavel: { txt: "Em regime (no alvo)", cor: "var(--color-success)" },
   resfriamento: { txt: "Resfriando", cor: "var(--color-secondary)" },
   ventilacao: { txt: "Ventilando (CO₂)", cor: "var(--color-warning)" },
+  sem_frio: { txt: "Sem resfriamento", cor: "var(--color-critical)" },
   manual: { txt: "Manual", cor: "var(--color-text-muted)" },
 };
 
@@ -41,6 +43,10 @@ export default function RoomCard({ room, climatizador }) {
     return STATUS.NORMAL;
   })();
 
+  // Alvo abaixo da temperatura do ar insuflado -> fisicamente inatingivel
+  const insufl = climatizador?.tempInsuflamento;
+  const alvoInatingivel = climatizador?.ligado && insufl != null && room.setpoint < insufl;
+
   const motivo = MOTIVO[room.vav.motivo] || MOTIVO.estavel;
   const barColor = room.vav.estado === "falha" ? "var(--color-critical)" : motivo.cor;
 
@@ -49,7 +55,10 @@ export default function RoomCard({ room, climatizador }) {
       <div className="room__head">
         <div>
           <div className="room__name">{room.nome}</div>
-          <div className="room__sub">{climatizador ? climatizador.nome : "sem climatizador"}</div>
+          <div className="room__sub">
+            {climatizador ? climatizador.nome : "sem climatizador"} · alvo{" "}
+            <strong>{room.setpoint}°C</strong>
+          </div>
         </div>
         <StatusBadge status={overall} />
       </div>
@@ -106,6 +115,12 @@ export default function RoomCard({ room, climatizador }) {
               }}
             />
           </div>
+          {alvoInatingivel && (
+            <div className="muted" style={{ fontSize: 11, color: "var(--color-warning)", marginTop: 5 }}>
+              ⚠ Alvo {room.setpoint}°C abaixo do ar insuflado ({insufl}°C): a sala não esfria
+              além de ~{insufl}°C mesmo com a VAV totalmente aberta.
+            </div>
+          )}
         </div>
 
         {/* Slider so aparece no modo manual */}

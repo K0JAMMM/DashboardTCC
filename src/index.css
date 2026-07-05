@@ -55,6 +55,12 @@ a {
   flex-direction: column;
   padding: 20px 14px;
   gap: 6px;
+  /* fixa a barra lateral: acompanha a rolagem e nao some da tela */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .sidebar__brand {
@@ -591,6 +597,9 @@ input[type="range"] {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    /* em telas estreitas volta ao fluxo normal (sem altura cheia) */
+    position: static;
+    height: auto;
   }
   .sidebar__footer {
     display: none;

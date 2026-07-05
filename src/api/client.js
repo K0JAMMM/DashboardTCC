@@ -78,6 +78,13 @@ export const api = {
       : http(`/salas/${roomId}/vav/modo`, { method: "PUT", body: JSON.stringify({ modo }) });
   },
 
+  // PUT /api/salas/:salaId/setpoint   { setpoint }  (alvo de temperatura da sala)
+  setRoomSetpoint(roomId, setpoint) {
+    return MODE === "mock"
+      ? tick(mock.setRoomSetpoint(roomId, setpoint))
+      : http(`/salas/${roomId}/setpoint`, { method: "PUT", body: JSON.stringify({ setpoint }) });
+  },
+
   // (demo) forca falha de VAV - util para testar o alerta de falha
   setVavFault(roomId, falha) {
     return MODE === "mock"
@@ -111,5 +118,20 @@ export const api = {
   // GET /api/ntfy/log  -> notificacoes enviadas
   getNtfyLog() {
     return MODE === "mock" ? tick(mock.getNtfyLog()) : http("/ntfy/log");
+  },
+
+  // GET /api/eventos  -> log de auditoria (rastreabilidade)
+  getEvents() {
+    return MODE === "mock" ? tick(mock.getEvents()) : http("/eventos");
+  },
+
+  // GET / PUT /api/identificacao  -> dados do estabelecimento / responsavel tecnico
+  getIdentificacao() {
+    return MODE === "mock" ? tick(mock.getIdentificacao()) : http("/identificacao");
+  },
+  saveIdentificacao(next) {
+    return MODE === "mock"
+      ? tick(mock.saveIdentificacao(next))
+      : http("/identificacao", { method: "PUT", body: JSON.stringify(next) });
   },
 };

@@ -10,10 +10,10 @@ export const palette = {
   text: "#1F2937", // Cinza escuro - texto principal
 };
 
-// Escala de qualidade do ar (CO2) inspirada no AQI da EPA.
+// Escala de qualidade do ar (CO2) - padrao hospitalar (ANVISA RE 09/2003: max 1000 ppm).
 export const aqiScale = [
   { level: "Bom", color: palette.success, max: 800 },
-  { level: "Moderado", color: palette.warning, max: 1200 },
+  { level: "Moderado", color: palette.warning, max: 1000 },
   { level: "Ruim", color: palette.critical, max: Infinity },
 ];
 

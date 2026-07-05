@@ -33,6 +33,7 @@ A dashboard fala **somente REST** com o backend.
   "id": "sala-1",
   "nome": "Sala 1",
   "climatizadorId": "clima-1",
+  "setpoint": 23,
   "temperatura": 22.6,
   "umidade": 51,
   "co2": 720,
@@ -45,10 +46,12 @@ A dashboard fala **somente REST** com o backend.
 `vav.estado` ∈ `"ok" | "falha"`. `vav.modo` ∈ `"auto" | "manual"`.
 `vav.motivo` ∈ `"estavel" | "resfriamento" | "ventilacao" | "manual"` (apenas informativo, para a UI).
 
-### Climatizador
+### Climatizador (unidade central de resfriamento / AHU)
 ```json
-{ "id": "clima-1", "nome": "Climatizador A", "salas": ["sala-1","sala-2"], "ligado": true, "setpoint": 23 }
+{ "id": "clima-1", "nome": "Climatizador A", "salas": ["sala-1","sala-2"], "ligado": true, "tempInsuflamento": 15 }
 ```
+`tempInsuflamento` = temperatura (°C) do ar frio insuflado, mantida constante. Quem regula
+a temperatura de **cada sala** é a VAV, modulando a vazão para atingir o `setpoint` da sala.
 
 ### Banheiro / exaustão
 ```json
@@ -63,11 +66,21 @@ As faixas são configuráveis **individualmente por sala**. O objeto é um mapa 
   "sala-1": {
     "temperatura": { "min": 20, "max": 26, "unit": "C" },
     "umidade":     { "min": 40, "max": 60, "unit": "%" },
-    "co2":         { "warn": 800, "critical": 1200, "unit": "ppm" }
+    "co2":         { "warn": 800, "critical": 1000, "unit": "ppm" }
   },
   "sala-2": { "temperatura": { "min": 18, "max": 24, "unit": "C" }, "...": "..." }
 }
 ```
+
+**Padrões default (ambiente hospitalar / EAS):**
+- **Umidade 40–60%** — ABNT NBR 7256 (tratamento de ar em Estabelecimentos Assistenciais
+  de Saúde), faixa para áreas comuns.
+- **CO₂ máx. 1000 ppm** — ANVISA RE 09/2003 (referência de renovação de ar interior, base
+  da NBR 7256). A ABNT NBR 17037:2023 adota limite dinâmico de 700 ppm acima do ar externo
+  (~1100 ppm). Adotamos 1000 ppm como crítico e 800 ppm como atenção.
+
+Como as faixas são editáveis por sala, áreas críticas (ex.: centro cirúrgico, 45–55%)
+podem receber limites mais restritos que áreas comuns.
 
 ### Alerta
 ```json
@@ -94,12 +107,15 @@ Base URL: `/api` (configurável via `VITE_API_BASE`).
 | GET | `/api/alertas` | Lista de alertas | RF12-RF16 |
 | POST | `/api/alertas/:id/reconhecer` | Marca alerta como reconhecido | — |
 | DELETE | `/api/alertas/reconhecidos` | Remove alertas reconhecidos | — |
+| PUT | `/api/salas/:salaId/setpoint` | `{ "setpoint": number }` — alvo de temperatura da sala | RF06 |
 | PUT | `/api/salas/:salaId/vav/modo` | `{ "modo": "auto"\|"manual" }` — modo de operação da VAV | RF06 |
 | PUT | `/api/salas/:salaId/vav` | `{ "abertura": 0-100 }` — override manual (força `modo:manual`) | RF06, RF08 |
-| PUT | `/api/climatizadores/:id` | `{ "ligado": bool, "setpoint": number }` | RF05, RF08 |
+| PUT | `/api/climatizadores/:id` | `{ "ligado": bool, "tempInsuflamento": number }` | RF05, RF08 |
 | PUT | `/api/banheiros/:id` | `{ "luz": bool }` — dispara intertravamento OR | RF10/RF11 |
 | GET / PUT | `/api/ntfy` | Configuração de notificações | RF17 |
 | GET | `/api/ntfy/log` | Histórico de notificações enviadas | RF17 |
+| GET | `/api/eventos` | Log de auditoria (rastreabilidade) | RNF07 |
+| GET / PUT | `/api/identificacao` | Dados do EAS e responsável técnico (cabeçalho do relatório) | RNF07 |
 
 ### Exemplo — `GET /api/estado`
 ```json
@@ -152,12 +168,27 @@ Broker sugerido: Mosquitto. Formato de payload: JSON.
 
 ### 4.1 Controle automático da VAV (essência da automação)
 
+Arquitetura **VAV multizona**: uma única unidade central de resfriamento (climatizador/AHU)
+insufla ar frio a temperatura constante (`tempInsuflamento`), e **cada sala tem seu próprio
+`setpoint`**. A VAV daquela sala modula a vazão de ar frio para manter a sala no setpoint —
+é assim que um só equipamento de frio atende várias salas com temperaturas independentes
+(prática padrão em automação predial).
+
 A VAV **modula sozinha** — ninguém define a abertura manualmente em operação normal.
 A malha de controle (no ESP32, ou no backend que comanda o ESP32) calcula a abertura a
 partir de duas demandas, usando a maior delas:
 
-- **Resfriamento:** proporcional ao erro `temperatura − setpoint do climatizador`.
+- **Resfriamento:** controle proporcional ao erro `temperatura − setpoint da própria sala`.
   Quanto mais quente que o alvo, mais a VAV abre.
+
+**Limite físico importante (validado por pesquisa):** uma VAV só modula a *vazão* de ar
+frio — ela **não consegue resfriar a sala abaixo da temperatura de insuflamento** do ar. Com
+o ar insuflado a 20 °C, a sala pode ser levada para baixo apenas até ~20 °C (com a VAV
+próxima de 100%), nunca menos. A faixa controlável vai de ≈ temperatura de insuflamento (VAV
+máxima) até a temperatura natural do ambiente sem resfriamento (VAV mínima). Definir um
+setpoint abaixo do insuflamento é fisicamente inatingível — a dashboard sinaliza esse caso.
+Sistemas que precisam *aquecer* uma zona usam VAV **com reaquecimento** (reheat), não modelado
+aqui (sistema só-resfriamento).
 - **Ventilação:** proporcional ao **CO₂**. Acima do limite de atenção a VAV abre para
   renovar o ar; no limite crítico vai a 100%.
 
@@ -226,11 +257,47 @@ CREATE TABLE parametros (        -- uma linha por sala
   co2_warn REAL, co2_critical REAL
 );
 
-CREATE TABLE eventos (           -- log mínimo de operação (RNF07)
-  id   INTEGER PRIMARY KEY AUTOINCREMENT,
-  tipo TEXT, descricao TEXT, ts TEXT NOT NULL
+CREATE TABLE eventos (           -- log de auditoria / rastreabilidade (RNF07)
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  categoria TEXT NOT NULL,       -- alerta|reconhecimento|parametro|setpoint|vav|climatizador|exaustao|registro
+  descricao TEXT NOT NULL,
+  sala_id   TEXT,
+  origem    TEXT,                -- sistema | operador
+  ts        TEXT NOT NULL
 );
+CREATE INDEX idx_eventos_ts ON eventos (ts);
 ```
+
+### Rastreabilidade e base legal (por que registrar)
+
+O log de eventos + o registro contínuo de telemetria (`leituras`) dão **rastreabilidade**,
+exigida para ambientes hospitalares e com valor de **segurança jurídica**:
+
+- **ABNT NBR 7256** — exige monitoramento e **registro contínuo** de temperatura, umidade e
+  pressão diferencial para rastreabilidade; é critério em acreditações (ONA, JCI).
+- **Lei 13.589/2018 (PMOC)** — obriga plano de manutenção/operação/controle com registros
+  para sistemas de climatização de uso público/coletivo (inclui hospitais); a ausência é
+  infração sanitária autuável (multa de R$ 2 mil a R$ 1,5 milhão), fiscalizada por
+  Vigilância Sanitária / ANVISA.
+- **ANVISA RE 09/2003** — parâmetros de referência da qualidade do ar interior.
+
+Recomenda-se reter os eventos e as leituras por período compatível com a política do EAS e
+permitir **exportação (CSV)** para apresentação em inspeções — implementado na tela *Auditoria*.
+
+**Conteúdo mínimo do relatório (registro válido, conforme PMOC / NBR 7256).** O CSV exportado
+inclui um cabeçalho de identificação além das linhas de eventos:
+
+- Identificação do **estabelecimento (EAS)** e **CNES**;
+- **Sistema** e base normativa (NBR 7256; Lei 13.589/2018; RE 09/2003);
+- **Responsável técnico** e **registro profissional (CREA/CFT) + ART/TRT**;
+- **Data/hora de geração** e **período** dos registros;
+- Para cada evento: data/hora, categoria, origem (sistema/operador), ambiente e descrição
+  com os **parâmetros medidos e unidades** (°C, %, ppm).
+
+> Observação: laudos de qualidade do ar por laboratório credenciado e certificados de
+> calibração dos sensores são documentos complementares do PMOC, mantidos fora do sistema.
+> A assinatura do responsável técnico (física ou digital/ICP-Brasil) é aposta no relatório
+> emitido.
 
 ---
 
