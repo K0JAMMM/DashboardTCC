@@ -1,17 +1,3 @@
-// ---------------------------------------------------------------------------
-// CLIENTE MQTT AO VIVO (navegador -> broker via WebSocket)
-// ---------------------------------------------------------------------------
-// Assina diretamente o topico publicado pelo ESP32 (o mesmo do sketch Arduino)
-// e entrega as leituras a dashboard, SEM backend intermediario.
-//
-// O ESP publica JSON como:
-//   { "temperature": 24.1, "humidity": 55, "co": 3, "co2": 620, "pm25": 12,
-//     "status": 0, "override": false }
-//
-// O navegador nao fala MQTT/TCP puro (porta 1883) — usa MQTT sobre WebSocket.
-// HiveMQ publico: wss://broker.hivemq.com:8884/mqtt (TLS, funciona em paginas https).
-// ---------------------------------------------------------------------------
-
 import mqtt from "mqtt";
 
 export const DEFAULT_URL = "wss://broker.hivemq.com:8884/mqtt";

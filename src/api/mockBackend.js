@@ -3,19 +3,11 @@ import { STATUS } from "../theme.js";
 const HISTORY_POINTS = 60; // ~ ultimos pontos por sala/metrica
 const TICK_MS = 3000;
 
-// Modelo termico do ambiente:
-//  - TEMP_AMBIENTE: temperatura natural da sala sem resfriamento (carga termica).
-//  - EFICIENCIA: quao perto do ar insuflado a sala chega com a VAV 100% aberta.
-// Limite fisico: a sala NUNCA esfria abaixo da temperatura de insuflamento
-// (principio do sistema VAV - so modula vazao de ar frio, nao muda a temperatura dele).
+
 const TEMP_AMBIENTE = 29;
 const EFICIENCIA = 0.95;
 
-// ----- Configuracao inicial (faixas de alerta editaveis POR SALA) ----------
-// Valores padrao conforme normas brasileiras para ambiente hospitalar:
-//  - Umidade: 40% a 60% (ABNT NBR 7256 - tratamento de ar em EAS, areas comuns)
-//  - CO2: max 1000 ppm (ANVISA RE 09/2003, base da NBR 7256; a NBR 17037:2023 usa
-//    700 ppm acima do ar externo). Usamos 1000 ppm como limite critico, 800 atencao.
+
 const defaultThresholds = () => ({
   temperatura: { min: 20, max: 26, unit: "C" },
   umidade: { min: 40, max: 60, unit: "%" },
@@ -31,8 +23,6 @@ let ntfyConfig = {
   minLevel: "atencao", // atencao | critico
 };
 
-// Identificacao do documento para o relatorio de auditoria (PMOC / NBR 7256).
-// Campos exigidos: estabelecimento, sistema e responsavel tecnico com registro/ART.
 let identificacao = {
   estabelecimento: "",
   cnes: "",
