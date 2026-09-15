@@ -2,10 +2,12 @@ PRAGMA foreign_keys = ON;
 
 -- CLIMATIZADOR (1) --- (1) VAV / (1) --- (N) SALA via SALA.id_climatizador
 CREATE TABLE IF NOT EXISTS CLIMATIZADOR (
-  id_climatizador INTEGER PRIMARY KEY AUTOINCREMENT,
-  nome            TEXT,
-  stauts          TEXT,      -- conforme DER (provavel "status")
-  capacidade      REAL
+  id_climatizador   INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome              TEXT,
+  status            TEXT,          -- corrigido (era "stauts"); "ligado" | "desligado"
+  capacidade        REAL,
+  ligado            INTEGER  DEFAULT 1,   -- espelha status em boolean p/ o dashboard (0/1)
+  temp_insuflamento REAL     DEFAULT 15   -- camada framework: campo exigido pelo contrato do dashboard (docs/API_CONTRACT.md), ausente na DER original
 );
 
 -- SALA  (FK id_climatizador -> CLIMATIZADOR)
@@ -15,6 +17,7 @@ CREATE TABLE IF NOT EXISTS SALA (
   andar           TEXT,
   status          TEXT,
   id_climatizador INTEGER,
+  setpoint        REAL DEFAULT 23,  -- camada framework: alvo de temperatura da sala, exigido pelo dashboard
   FOREIGN KEY (id_climatizador) REFERENCES CLIMATIZADOR (id_climatizador)
 );
 
@@ -25,6 +28,8 @@ CREATE TABLE IF NOT EXISTS VAV (
   abertura  REAL,
   vazao_ar  REAL,
   id_sala   INTEGER UNIQUE,
+  modo      TEXT DEFAULT 'auto',     -- camada framework: 'auto' | 'manual'
+  motivo    TEXT DEFAULT 'estavel',  -- camada framework: motivo exibido na UI (estavel|resfriamento|ventilacao|manual)
   FOREIGN KEY (id_sala) REFERENCES SALA (id_sala)
 );
 
@@ -50,13 +55,14 @@ CREATE TABLE IF NOT EXISTS LIMITE_ALERTA (
 
 -- ALERTA  (FK id_sala -> SALA, FK id_sensor -> SENSOR)  -- SALA 1 : N ALERTA
 CREATE TABLE IF NOT EXISTS ALERTA (
-  id_alerta INTEGER PRIMARY KEY AUTOINCREMENT,
-  tipo      TEXT,
-  mensagem  TEXT,
-  nivel     TEXT,
-  data_hora TEXT,
-  id_sala   INTEGER,
-  id_sensor INTEGER,
+  id_alerta   INTEGER PRIMARY KEY AUTOINCREMENT,
+  tipo        TEXT,
+  mensagem    TEXT,
+  nivel       TEXT,
+  data_hora   TEXT,
+  id_sala     INTEGER,
+  id_sensor   INTEGER,
+  reconhecido INTEGER DEFAULT 0,  -- camada framework: usado por POST /api/alertas/:id/reconhecer
   FOREIGN KEY (id_sala)   REFERENCES SALA (id_sala),
   FOREIGN KEY (id_sensor) REFERENCES SENSOR (id_sensor)
 );
