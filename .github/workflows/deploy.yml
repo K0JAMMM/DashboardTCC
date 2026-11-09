@@ -1,0 +1,119 @@
+# ---------------------------------------------------------------------------
+# CD - Deploy automatico a cada push/merge na main.
+#
+#   1. Portao de seguranca: reexecuta TODOS os testes de seguranca
+#      (reutiliza security-tests.yml). Se algum falhar, nada e publicado.
+#   2. Backend: gera a imagem Docker e publica no GitHub Container Registry
+#      (ghcr.io/<dono>/hvac-backend:latest e :<sha>).
+#      Opcional: se o secret RENDER_DEPLOY_HOOK_URL existir, avisa o Render
+#      (ou qualquer host com "deploy hook") para subir a imagem nova.
+#   3. Frontend: build do dashboard e publicacao no GitHub Pages
+#      (modo demonstracao/mock, ja que o Pages so hospeda arquivos estaticos).
+#
+# Configuracao unica no GitHub: Settings > Pages > Source = "GitHub Actions".
+# ---------------------------------------------------------------------------
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+jobs:
+  seguranca:
+    name: Portao - testes de seguranca
+    uses: ./.github/workflows/security-tests.yml
+
+  backend:
+    name: Backend - imagem Docker (GHCR)
+    needs: seguranca
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nome da imagem (GHCR exige minusculas)
+        id: img
+        run: echo "nome=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hvac-backend" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: |
+            ${{ steps.img.outputs.nome }}:latest
+            ${{ steps.img.outputs.nome }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Disparar deploy no servidor (opcional)
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "Secret RENDER_DEPLOY_HOOK_URL nao configurado: imagem publicada, deploy do servidor ignorado."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" > /dev/null
+          echo "Deploy do backend disparado."
+
+      - name: Resumo
+        run: |
+          {
+            echo "## 🚀 Backend publicado"
+            echo "\`docker pull ${{ steps.img.outputs.nome }}:${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-build:
+    name: Frontend - build
+    needs: seguranca
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build (modo demonstracao para o GitHub Pages)
+        run: npm run build
+        env:
+          VITE_API_MODE: mock
+          BASE_PATH: /${{ github.event.repository.name }}/
+      - name: Fallback de rotas do SPA
+        run: cp dist/index.html dist/404.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  frontend-deploy:
+    name: Frontend - GitHub Pages
+    needs: frontend-build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -1,5 +1,6 @@
 import { Routes, Route, NavLink, Navigate } from "react-router-dom";
 import { useSystem } from "./context/ConfigContext.jsx";
+import { logout } from "./api/client.js";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import ParametrosPage from "./pages/ParametrosPage.jsx";
 import AlertasPage from "./pages/AlertasPage.jsx";
@@ -55,6 +56,11 @@ function Topbar({ title }) {
         <span className="tag-source">{mode === "mock" ? "DADOS SIMULADOS" : "BACKEND REAL"}</span>
         <span>Atualizado: {ts}</span>
         <span className={`conn-dot ${online ? "" : "offline"}`}>{online ? "Online" : "Offline"}</span>
+        {mode !== "mock" && (
+          <button className="btn btn--ghost" onClick={logout}>
+            Sair
+          </button>
+        )}
       </div>
     </header>
   );

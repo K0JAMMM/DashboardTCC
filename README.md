@@ -45,6 +45,13 @@ Acesse <http://localhost:5173>.
    ```
 3. Ajuste o `proxy.target` em `vite.config.js` para o endereço do backend.
 
+## Segurança e testes
+
+O backend tem autenticação (JWT + papéis + permissão por sala), senhas com scrypt, validação
+estrita de entrada e proteção anti-bot. Os testes de segurança (IDOR, Criptografia/Senhas,
+Injeção e Bots) rodam com `cd backend && npm test` e automaticamente em todo Pull Request;
+o deploy roda a cada merge na `main`. Ver [`docs/TESTES_SEGURANCA.md`](docs/TESTES_SEGURANCA.md).
+
 ## Estrutura
 
 ```

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.js";
+import { escCsv } from "../utils/csv.js";
 
 const CATEGORIAS = {
   alerta: { txt: "Alerta", cor: "var(--color-critical)" },
@@ -28,7 +29,8 @@ function CatBadge({ categoria }) {
   );
 }
 
-const esc = (c) => `"${String(c ?? "").replace(/"/g, '""')}"`;
+// Escape seguro contra injecao de formula (ver src/utils/csv.js).
+const esc = escCsv;
 
 // CSV no formato de registro exigido pelo PMOC / NBR 7256:
 // cabecalho com identificacao do estabelecimento, responsavel tecnico e metadados.
