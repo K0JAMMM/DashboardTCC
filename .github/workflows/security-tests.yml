@@ -1,0 +1,106 @@
+# ---------------------------------------------------------------------------
+# CI - Testes de seguranca automaticos em todo Pull Request.
+#
+# Roda os 4 grupos de testes (IDOR, Criptografia/Senhas, Injecao, Bots)
+# contra o codigo-fonte do backend, audita as dependencias e garante que o
+# frontend compila. Se qualquer teste falhar, o PR fica com check vermelho.
+# Tambem e reutilizado pelo workflow de deploy (workflow_call) como portao:
+# nada vai para producao sem passar aqui.
+# ---------------------------------------------------------------------------
+name: Testes de Seguranca
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  testes-seguranca:
+    name: Testes de seguranca (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Cada categoria gera saida legivel (spec) + relatorio JUnit.
+      REPORTERS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: "1/4 IDOR"
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 $REPORTERS --test-reporter-destination=junit-idor.xml test/idor.test.js | tee idor.txt
+
+      - name: "2/4 Criptografia e Senhas"
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 $REPORTERS --test-reporter-destination=junit-senhas.xml test/criptografia-senhas.test.js | tee senhas.txt
+
+      - name: "3/4 Injecao de codigo"
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 $REPORTERS --test-reporter-destination=junit-injecao.xml test/injecao.test.js | tee injecao.txt
+
+      - name: "4/4 Bots"
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 $REPORTERS --test-reporter-destination=junit-bots.xml test/bots.test.js | tee bots.txt
+
+      - name: Resumo no Pull Request
+        if: ${{ !cancelled() }}
+        run: |
+          num() { grep -E "^ℹ $2 " "$1" 2>/dev/null | awk '{print $3}' || true; }
+          {
+            echo "## 🔒 Testes de seguranca — Node ${{ matrix.node }}"
+            echo
+            echo "| Categoria | ✅ Passaram | ❌ Falharam |"
+            echo "|---|---|---|"
+            for par in "IDOR:idor" "Criptografia e Senhas:senhas" "Injecao de codigo:injecao" "Bots:bots"; do
+              nome="${par%%:*}"; arq="${par##*:}.txt"
+              echo "| $nome | $(num "$arq" pass) | $(num "$arq" fail) |"
+            done
+            echo
+            echo "<details><summary>Saida completa dos testes</summary>"
+            echo
+            echo '```'
+            cat idor.txt senhas.txt injecao.txt bots.txt 2>/dev/null
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar relatorios JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-seguranca-node${{ matrix.node }}
+          path: backend/junit-*.xml
+
+      - name: Auditoria de dependencias (vulnerabilidades conhecidas)
+        run: npm audit --omit=dev --audit-level=high
+
+  frontend:
+    name: Build do frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_API_MODE: real

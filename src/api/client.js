@@ -5,11 +5,69 @@ const BASE = import.meta.env.VITE_API_BASE || "/api";
 
 if (MODE === "mock") startSimulation();
 
+// ----- Sessao (JWT) ---------------------------------------------------------
+// Token fica em sessionStorage (some ao fechar a aba). Cada requisicao envia
+// Authorization: Bearer <token>; um 401 derruba a sessao e volta ao login.
+const CHAVE_TOKEN = "hvac_token";
+let token = null;
+try {
+  token = sessionStorage.getItem(CHAVE_TOKEN);
+} catch {
+  /* storage indisponivel */
+}
+
+export function getToken() {
+  return token;
+}
+
+export function setToken(t) {
+  token = t || null;
+  try {
+    t ? sessionStorage.setItem(CHAVE_TOKEN, t) : sessionStorage.removeItem(CHAVE_TOKEN);
+  } catch {
+    /* ignora */
+  }
+}
+
+// POST /api/login  { login, senha, website }  (website = honeypot, sempre vazio para humanos)
+export async function login(loginNome, senha, website = "") {
+  const res = await fetch(`${BASE}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login: loginNome, senha, website }),
+  });
+  const corpo = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg =
+      res.status === 429
+        ? "Muitas tentativas. Aguarde alguns minutos."
+        : res.status === 423
+          ? "Conta bloqueada temporariamente por excesso de tentativas."
+          : corpo.erro || "Falha no login";
+    throw new Error(msg);
+  }
+  setToken(corpo.token);
+  return corpo.usuario;
+}
+
+export function logout() {
+  setToken(null);
+  window.dispatchEvent(new Event("auth:expired"));
+}
+
 async function http(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
   });
+  if (res.status === 401) {
+    setToken(null);
+    window.dispatchEvent(new Event("auth:expired"));
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status} em ${path}`);
   if (res.status === 204) return null;
   return res.json();

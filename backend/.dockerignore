@@ -1,0 +1,8 @@
+node_modules
+hvac.db
+hvac.db-*
+.env
+test
+test-results.xml
+Dockerfile
+.dockerignore

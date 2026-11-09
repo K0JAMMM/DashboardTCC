@@ -110,12 +110,20 @@ Base URL: `/api` (configurável via `VITE_API_BASE`).
 | PUT | `/api/salas/:salaId/setpoint` | `{ "setpoint": number }` — alvo de temperatura da sala | RF06 |
 | PUT | `/api/salas/:salaId/vav/modo` | `{ "modo": "auto"\|"manual" }` — modo de operação da VAV | RF06 |
 | PUT | `/api/salas/:salaId/vav` | `{ "abertura": 0-100 }` — override manual (força `modo:manual`) | RF06, RF08 |
-| PUT | `/api/climatizadores/:id` | `{ "ligado": bool, "tempInsuflamento": number }` | RF05, RF08 |
+| PUT | `/api/salas/:salaId/vav/falha` | `{ "falha": bool }` — (demo) força/normaliza falha de VAV | — |
+| PUT | `/api/climatizadores/:id` | `{ "ligado"?: bool, "tempInsuflamento"?: number }` — patch parcial | RF05, RF08 |
 | PUT | `/api/banheiros/:id` | `{ "luz": bool }` — dispara intertravamento OR | RF10/RF11 |
 | GET / PUT | `/api/ntfy` | Configuração de notificações | RF17 |
 | GET | `/api/ntfy/log` | Histórico de notificações enviadas | RF17 |
 | GET | `/api/eventos` | Log de auditoria (rastreabilidade) | RNF07 |
 | GET / PUT | `/api/identificacao` | Dados do EAS e responsável técnico (cabeçalho do relatório) | RNF07 |
+| POST | `/api/salas/completa` | Camada de provisionamento: cria SALA+VAV+SENSORES+LIMITES em uma transação. Body: `{ nome, andar?, idClimatizador, setpoint?, vav?, sensores? }` (ver `backend/provisioning.js`) | — |
+
+> As rotas `setpoint`, `vav`, `vav/modo`, `vav/falha`, `climatizadores/:id`, `alertas/:id/reconhecer`
+> e `alertas/reconhecidos` traduzem o payload em camelCase acima pros nomes de coluna da DER
+> (ex.: `tempInsuflamento` → `CLIMATIZADOR.temp_insuflamento`) e validam a sala/climatizador/alerta
+> referenciado antes de gravar — ver `backend/acoes.js`. `ALERTA` ganhou a coluna `reconhecido`
+> (INTEGER DEFAULT 0, migrada em `backend/db.js`) para suportar essas duas últimas.
 
 ### Exemplo — `GET /api/estado`
 ```json
