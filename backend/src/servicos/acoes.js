@@ -5,13 +5,14 @@
 // rotas dedicadas com payload em camelCase (docs/API_CONTRACT.md secao 2,
 // src/api/client.js) que nao batem 1:1 com os nomes de coluna da DER
 // (ex.: "tempInsuflamento" -> CLIMATIZADOR.temp_insuflamento). O crud()
-// generico de server.js so aceita o nome exato da coluna no corpo, entao
+// generico (src/rotas/crud.js) so aceita o nome exato da coluna no corpo, entao
 // essas acoes de escrita so funcionavam em modo mock. Este arquivo traduz o
 // payload do frontend pros nomes de coluna certos e valida a entidade
 // referenciada antes de gravar.
 // ---------------------------------------------------------------------------
 
-import { db } from "./db.js";
+import { db } from "../banco/db.js";
+import { LIMITES } from "../seguranca/validacao.js";
 
 function salaExiste(idSala) {
   return db.prepare("SELECT id_sala FROM SALA WHERE id_sala = ?").get(idSala);
@@ -21,7 +22,7 @@ function salaExiste(idSala) {
 export function setVavAbertura(idSala, abertura) {
   if (!salaExiste(idSala)) return { ok: false, status: 404, erro: `sala ${idSala} nao existe` };
   const valor = Number(abertura);
-  if (Number.isNaN(valor)) return { ok: false, status: 400, erro: "abertura precisa ser numero" };
+  if (!Number.isFinite(valor)) return { ok: false, status: 400, erro: "abertura precisa ser numero finito" };
 
   const aberturaClamped = Math.max(0, Math.min(100, valor));
   db.prepare("UPDATE VAV SET abertura = ?, modo = 'manual', motivo = 'manual' WHERE id_sala = ?")
@@ -56,7 +57,7 @@ export function setVavFalha(idSala, falha) {
 export function setSalaSetpoint(idSala, setpoint) {
   if (!salaExiste(idSala)) return { ok: false, status: 404, erro: `sala ${idSala} nao existe` };
   const valor = Number(setpoint);
-  if (Number.isNaN(valor)) return { ok: false, status: 400, erro: "setpoint precisa ser numero" };
+  if (!Number.isFinite(valor)) return { ok: false, status: 400, erro: "setpoint precisa ser numero finito" };
 
   const setpointClamped = Math.max(16, Math.min(30, valor)); // mesma faixa do simulador mock
   db.prepare("UPDATE SALA SET setpoint = ? WHERE id_sala = ?").run(setpointClamped, idSala);
@@ -78,7 +79,9 @@ export function setClimatizador(idClimatizador, patch = {}) {
   }
   if ("tempInsuflamento" in patch) {
     const valor = Number(patch.tempInsuflamento);
-    if (Number.isNaN(valor)) return { ok: false, status: 400, erro: "tempInsuflamento precisa ser numero" };
+    if (!Number.isFinite(valor) || valor < LIMITES.insuflamento[0] || valor > LIMITES.insuflamento[1]) {
+      return { ok: false, status: 400, erro: `tempInsuflamento deve estar entre ${LIMITES.insuflamento[0]} e ${LIMITES.insuflamento[1]}` };
+    }
     sets.push("temp_insuflamento = ?");
     valores.push(valor);
   }
@@ -111,23 +114,39 @@ function paraAlertaFrontend(row) {
   };
 }
 
-// GET /api/alertas
+// GET /api/alertas  (alertas arquivados nao aparecem, mas continuam no banco)
 export function listarAlertas() {
-  return db.prepare("SELECT * FROM ALERTA ORDER BY id_alerta DESC").all().map(paraAlertaFrontend);
+  return db
+    .prepare("SELECT * FROM ALERTA WHERE COALESCE(arquivado, 0) = 0 ORDER BY id_alerta DESC")
+    .all()
+    .map(paraAlertaFrontend);
 }
 
-// POST /api/alertas/:id/reconhecer
-export function reconhecerAlerta(idAlerta) {
+// POST /api/alertas/:id/reconhecer -- registra QUEM (id do usuario do token,
+// nunca do corpo da requisicao) e QUANDO reconheceu.
+export function reconhecerAlerta(idAlerta, idUsuario) {
   const alerta = db.prepare("SELECT id_alerta FROM ALERTA WHERE id_alerta = ?").get(idAlerta);
   if (!alerta) return { ok: false, status: 404, erro: `alerta ${idAlerta} nao existe` };
 
-  db.prepare("UPDATE ALERTA SET reconhecido = 1 WHERE id_alerta = ?").run(idAlerta);
+  db.prepare("UPDATE ALERTA SET reconhecido = 1, reconhecido_por = ?, reconhecido_em = ? WHERE id_alerta = ?").run(
+    idUsuario ?? null,
+    new Date().toISOString(),
+    idAlerta
+  );
 
   return { ok: true, alertas: listarAlertas() };
 }
 
-// DELETE /api/alertas/reconhecidos
-export function limparReconhecidos() {
-  db.prepare("DELETE FROM ALERTA WHERE reconhecido = 1").run();
+// DELETE /api/alertas/reconhecidos -- antes apagava a trilha de auditoria;
+// agora ARQUIVA. salasPermitidas = null (admin) => todas as salas.
+export function limparReconhecidos(salasPermitidas = null) {
+  if (salasPermitidas === null) {
+    db.prepare("UPDATE ALERTA SET arquivado = 1 WHERE reconhecido = 1").run();
+  } else if (salasPermitidas.length) {
+    const marcadores = salasPermitidas.map(() => "?").join(", ");
+    db.prepare(`UPDATE ALERTA SET arquivado = 1 WHERE reconhecido = 1 AND id_sala IN (${marcadores})`).run(
+      ...salasPermitidas
+    );
+  }
   return { ok: true, alertas: listarAlertas() };
 }

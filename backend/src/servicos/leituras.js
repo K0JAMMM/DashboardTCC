@@ -1,17 +1,24 @@
 // ---------------------------------------------------------------------------
-// Regras de negocio: inserir leitura, avaliar LIMITE_ALERTA e gerar ALERTA + ntfy.
+// Regras de negocio das leituras: inserir LEITURA_SENSOR, avaliar
+// LIMITE_ALERTA e gerar ALERTA (+ notificacao ntfy).
 // ---------------------------------------------------------------------------
 
-import { db } from "./db.js";
-
-const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "tcc-hvac-alertas";
-const NTFY_ENABLED = process.env.NTFY_ENABLED !== "false";
+import { db } from "../banco/db.js";
+import { FAIXA_FISICA } from "../seguranca/validacao.js";
+import { enviarNtfy } from "../integracoes/ntfy.js";
 
 // Insere uma LEITURA_SENSOR e avalia os limites da sala do sensor.
+// Valida tipo e faixa fisica aqui para valer tanto no caminho REST quanto no MQTT.
 export function inserirLeitura({ id_sensor, valor, qualidade = null }) {
+  if (!Number.isInteger(id_sensor)) return { ok: false, erro: "id_sensor invalido" };
+  if (typeof valor !== "number" || !Number.isFinite(valor)) return { ok: false, erro: "valor deve ser numero finito" };
   const sensor = db.prepare("SELECT * FROM SENSOR WHERE id_sensor = ?").get(id_sensor);
   if (!sensor) return { ok: false, erro: "sensor inexistente" };
+  const faixa = FAIXA_FISICA[sensor.tipo];
+  if (faixa && (valor < faixa[0] || valor > faixa[1])) {
+    console.warn(`Leitura descartada: sensor ${id_sensor} (${sensor.tipo}) = ${valor} fora da faixa fisica`);
+    return { ok: false, erro: "valor fora da faixa fisica do sensor" };
+  }
 
   const data_hora = new Date().toISOString();
   const info = db
@@ -50,22 +57,4 @@ function avaliarLimites(sensor, valor, data_hora) {
   ).run(sensor.tipo, mensagem, nivel, data_hora, sensor.id_sala, sensor.id_sensor);
 
   enviarNtfy(nivel, mensagem);
-}
-
-// Publica o alerta no ntfy.sh (RF17).
-async function enviarNtfy(nivel, mensagem) {
-  if (!NTFY_ENABLED) return;
-  try {
-    await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
-      method: "POST",
-      headers: {
-        Title: nivel === "critico" ? "HVAC - ALARME CRITICO" : "HVAC - Atencao",
-        Priority: nivel === "critico" ? "urgent" : "high",
-        Tags: nivel === "critico" ? "rotating_light" : "warning",
-      },
-      body: mensagem,
-    });
-  } catch (e) {
-    console.error("Falha ao enviar ntfy:", e.message);
-  }
 }

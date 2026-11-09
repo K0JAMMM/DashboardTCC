@@ -13,7 +13,7 @@
 // componente React.
 // ---------------------------------------------------------------------------
 
-import { db } from "./db.js";
+import { db } from "../banco/db.js";
 
 // Conjunto padrao de sensores/limites (mesmos defaults usados no seed(),
 // alinhados a ABNT NBR 7256 / ANVISA RE 09/2003 - ver docs/CONFORMIDADE.md).

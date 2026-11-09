@@ -4,7 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "hvac.db");
+// Padrao: backend/hvac.db (mesmo lugar de sempre, fora de src/).
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "..", "hvac.db");
 
 export const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
@@ -49,6 +50,15 @@ function migrar() {
   }
   if (!colunas("ALERTA").includes("reconhecido")) {
     db.exec(`ALTER TABLE ALERTA ADD COLUMN reconhecido INTEGER DEFAULT 0`);
+  }
+  // Seguranca: "limpar reconhecidos" passa a ARQUIVAR (nao apaga a trilha) e o
+  // reconhecimento registra quem e quando.
+  if (!colunas("ALERTA").includes("arquivado")) {
+    db.exec(`ALTER TABLE ALERTA ADD COLUMN arquivado INTEGER DEFAULT 0`);
+  }
+  if (!colunas("ALERTA").includes("reconhecido_por")) {
+    db.exec(`ALTER TABLE ALERTA ADD COLUMN reconhecido_por INTEGER`);
+    db.exec(`ALTER TABLE ALERTA ADD COLUMN reconhecido_em TEXT`);
   }
 }
 
@@ -97,5 +107,5 @@ function seed() {
     }
   });
   tx();
-  console.log("Banco inicializado e populado (seed) com sucesso.");
+  if (process.env.NODE_ENV !== "test") console.log("Banco inicializado e populado (seed) com sucesso.");
 }

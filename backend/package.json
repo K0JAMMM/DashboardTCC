@@ -5,14 +5,28 @@
   "type": "module",
   "description": "Backend Node + SQLite (conforme DER) para o sistema de automacao HVAC",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "init-db": "node db.js"
+    "start": "node --env-file=.env server.js",
+    "dev": "node --env-file=.env --watch server.js",
+    "init-db": "node src/banco/db.js",
+    "criar-usuario": "node --env-file=.env scripts/criar-usuario.js",
+    "criar-dispositivo": "node --env-file=.env scripts/criar-dispositivo.js",
+    "test": "node --test --test-concurrency=1 --test-reporter=spec test/idor.test.js test/criptografia-senhas.test.js test/injecao.test.js test/bots.test.js",
+    "test:idor": "node --test --test-concurrency=1 --test-reporter=spec test/idor.test.js",
+    "test:senhas": "node --test --test-concurrency=1 --test-reporter=spec test/criptografia-senhas.test.js",
+    "test:injecao": "node --test --test-concurrency=1 --test-reporter=spec test/injecao.test.js",
+    "test:bots": "node --test --test-concurrency=1 --test-reporter=spec test/bots.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "mqtt": "^5.10.1"
+    "express-rate-limit": "^8.7.3",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "mqtt": "^5.10.1",
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "node": ">=20.6"
   }
 }

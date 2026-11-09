@@ -76,3 +76,40 @@ CREATE TABLE IF NOT EXISTS LEITURA_SENSOR (
   id_sensor            INTEGER,
   FOREIGN KEY (id_sensor) REFERENCES SENSOR (id_sensor)
 );
+
+-- ===========================================================================
+-- SEGURANCA (fora da DER original): usuarios, permissao por sala e dispositivos
+-- ===========================================================================
+
+-- Usuarios do dashboard. A senha NUNCA e armazenada: so o hash scrypt+salt.
+CREATE TABLE IF NOT EXISTS USUARIO (
+  id_usuario      INTEGER PRIMARY KEY AUTOINCREMENT,
+  login           TEXT NOT NULL UNIQUE,
+  senha_hash      TEXT NOT NULL,
+  papel           TEXT NOT NULL CHECK (papel IN ('viewer', 'operator', 'admin')),
+  falhas_login    INTEGER NOT NULL DEFAULT 0,   -- tentativas erradas seguidas (anti forca bruta)
+  bloqueado_ate   TEXT,                         -- ISO; conta bloqueada ate esse instante
+  criado_em       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Quais salas cada operador pode comandar (controle de acesso por objeto - anti IDOR).
+CREATE TABLE IF NOT EXISTS USUARIO_SALA (
+  id_usuario INTEGER NOT NULL REFERENCES USUARIO (id_usuario) ON DELETE CASCADE,
+  id_sala    INTEGER NOT NULL REFERENCES SALA (id_sala) ON DELETE CASCADE,
+  PRIMARY KEY (id_usuario, id_sala)
+);
+
+-- Dispositivos (ESP32). Guarda so o SHA-256 do token; cada um so escreve na propria sala.
+CREATE TABLE IF NOT EXISTS DISPOSITIVO (
+  id_dispositivo INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome           TEXT NOT NULL,
+  token_hash     TEXT NOT NULL UNIQUE,
+  id_sala        INTEGER NOT NULL REFERENCES SALA (id_sala)
+);
+
+-- Trilha de leituras e append-only (rastreabilidade NBR 7256 / PMOC).
+CREATE TRIGGER IF NOT EXISTS trg_leitura_sem_delete BEFORE DELETE ON LEITURA_SENSOR
+BEGIN SELECT RAISE(ABORT, 'LEITURA_SENSOR e append-only'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_leitura_sem_update BEFORE UPDATE ON LEITURA_SENSOR
+BEGIN SELECT RAISE(ABORT, 'LEITURA_SENSOR e append-only'); END;

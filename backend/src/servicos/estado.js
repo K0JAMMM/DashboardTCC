@@ -9,7 +9,7 @@
 //
 // montarEstado() e o adaptador entre as duas pontas: le as tabelas cruas via
 // SQL e devolve exatamente o formato que useSystem()/DashboardPage/RoomCard/
-// ClimatizadorPanel ja esperam - assim, uma sala criada via provisioning.js
+// ClimatizadorPanel ja esperam - assim, uma sala criada via provisionamento.js
 // (ou inserida manualmente) aparece no dashboard sem tocar em nenhum
 // componente.
 //
@@ -20,7 +20,7 @@
 // funcionam no modo mock. Fica registrado como proximo passo.
 // ---------------------------------------------------------------------------
 
-import { db } from "./db.js";
+import { db } from "../banco/db.js";
 
 const METRICAS = ["temperatura", "umidade", "co2"];
 

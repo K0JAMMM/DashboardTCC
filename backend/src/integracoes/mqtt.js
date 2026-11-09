@@ -4,18 +4,25 @@
 // ---------------------------------------------------------------------------
 
 import mqtt from "mqtt";
-import { db } from "./db.js";
-import { inserirLeitura } from "./logic.js";
+import { db } from "../banco/db.js";
+import { inserirLeitura } from "../servicos/leituras.js";
 
-const MQTT_URL = process.env.MQTT_URL || "mqtt://broker.hivemq.com:1883";
-const MQTT_TOPIC = process.env.MQTT_TOPIC || "tcc-hvac-kaue/airquality";
-const SALA_ID = Number(process.env.SALA_ID || 1); // sala que recebe os dados do ESP
 
 // Mapeia as chaves do JSON publicado pelo ESP -> tipo do SENSOR na DER
 const MAPA = { temperature: "temperatura", humidity: "umidade", co2: "co2" };
 
-export function startMqtt() {
-  const client = mqtt.connect(MQTT_URL);
+// cfg = config.mqtt ({ url, topic, username, password, salaId }) - sem defaults publicos.
+export function startMqtt(cfg) {
+  if (!cfg?.url || !cfg?.topic) {
+    console.log("MQTT desativado (defina MQTT_URL e MQTT_TOPIC no .env para ativar).");
+    return null;
+  }
+  const { url: MQTT_URL, topic: MQTT_TOPIC, salaId: SALA_ID } = cfg;
+  const client = mqtt.connect(MQTT_URL, {
+    username: cfg.username,
+    password: cfg.password,
+    reconnectPeriod: 5000,
+  });
 
   client.on("connect", () => {
     console.log(`MQTT conectado (${MQTT_URL}), assinando "${MQTT_TOPIC}" -> Sala ${SALA_ID}`);
@@ -24,6 +31,7 @@ export function startMqtt() {
   client.on("error", (e) => console.error("MQTT erro:", e.message));
 
   client.on("message", (_topic, payload) => {
+    if (payload.length > 4096) return; // payload gigante: descarta
     let d;
     try {
       d = JSON.parse(payload.toString());
